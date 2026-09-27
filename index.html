@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Interview Dashboard</title>
+    
+    <!-- ১. সঠিক এবং আপডেটেড LiveKit UMD CDN Script (এটি একদম নিখুঁতভাবে গ্লোবাল অবজেক্ট লোড করবে) -->
+    <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.22.0/dist/livekit-client.umd.min.js"></script>
+    
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: #f3f4f6; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
+        .container { background: white; max-width: 900px; width: 100%; padding: 25px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); text-align: center; }
+        .question-box { background: #e8f0fe; color: #1967d2; padding: 20px; border-radius: 8px; font-size: 22px; font-weight: bold; margin: 20px 0; border-left: 5px solid #1a73e8; display: none; text-align: left; }
+        .video-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px; min-height: 300px; }
+        .video-box { background: #000; border-radius: 8px; overflow: hidden; position: relative; display: flex; align-items: center; justify-content: center; color: white; min-height: 300px; }
+        video, audio { width: 100%; height: 100%; object-fit: cover; }
+        button { padding: 15px 30px; font-size: 18px; font-weight: bold; cursor: pointer; background: #1a73e8; color: white; border: none; border-radius: 6px; transition: 0.3s; }
+        button:hover { background: #1557b0; }
+        #status { margin-top: 15px; font-weight: bold; color: #1e7e34; font-size: 18px; }
+        .label { position: absolute; bottom: 10px; left: 10px; background: rgba(0,0,0,0.6); padding: 5px 10px; border-radius: 4px; font-size: 12px; z-index: 10; }
+        #ai-icon { font-size: 48px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>AI Automated Interview Panel</h2>
+    <p>ক্যামেরা ও মাইক্রোফোন অন করে AI এজেন্টের প্রশ্নের উত্তর দিন।</p>
+    <button id="start-btn" onclick="startInterview()">Start Interview</button>
+    <div id="status">Ready to Start</div>
+
+    <div class="question-box" id="question-display">ইন্টারভিউ শুরু হচ্ছে...</div>
+
+    <div class="video-grid">
+        <div class="video-box" id="local-video-container">
+            <span class="label">Your Camera (You)</span>
+        </div>
+        <div class="video-box" id="remote-video-container">
+            <span class="label">AI Agent Visuals</span>
+            <div id="ai-icon">🤖</div>
+        </div>
+    </div>
+</div>
+
+<!-- সিকিউর অডিও প্লেব্যাক ট্র্যাকিংয়ের জন্য একটি হিডেন ডিভ -->
+<div id="audio-container" style="display: none;"></div>
+
+<script>
+    async function startInterview() {
+        const statusDiv = document.getElementById('status');
+        const startBtn = document.getElementById('start-btn');
+        const qBox = document.getElementById('question-display');
+        
+        startBtn.disabled = true;
+        statusDiv.innerText = "Optimizing your audio and video devices...";
+        // ১. কাস্টমারের পিসির সব অডিও-ভিডিও ডিভাইসের লিস্ট নেওয়া
+        const devices = await LivekitClient.Room.getLocalDevices();
+
+        // ২. 'Stereo Mix' বা 'Virtual' ডিভাইস ফিল্টার করে বাদ দিয়ে আসল মাইক্রোফোন খুঁজে বের করা
+        const bestMicrophone = devices.find(d => 
+            d.kind === 'audioinput' && 
+            !d.label.toLowerCase().includes('stereo mix') && 
+            !d.label.toLowerCase().includes('virtual')
+        );
+
+        // ৩. সিস্টেম অটোমেটিকভাবে ডিভাইস সিলেক্ট করে রুমে পাবলিশ করবে
+        const audioCaptureOptions = bestMicrophone ? { deviceId: bestMicrophone.deviceId } : true;
+
+        statusDiv.innerText = "Connecting to Gemini Agent...";
+
+        if (typeof LivekitClient === 'undefined') {
+            statusDiv.innerText = "Error: LiveKit SDK failed to load. Please refresh.";
+            statusDiv.style.color = "red";
+            startBtn.disabled = false;
+            return;
+        }
+
+        try {
+            const response = await fetch('/get-token?username=Candidate_User');
+            const data = await response.json();
+            const token = data.token;
+
+            const LIVEKIT_URL = "wss://rwebboots-chodb5g1.livekit.cloud"; 
+
+            const room = new LivekitClient.Room();
+            await room.connect(LIVEKIT_URL, token);
+            statusDiv.innerText = "Interview is Live! Please speak clearly.";
+            qBox.style.display = "block";
+
+            await room.localParticipant.enableCameraAndMicrophone({
+                video: true,
+                audio: audioCaptureOptions // ভুল ড্রাইভার অটো-ফিল্টার হয়ে আসল মাইক্রোফোন কানেক্ট হবে
+            });
+            
+            // লোকাল ক্যামেরা রেন্ডার করা
+            const localVideoTrack = room.localParticipant.getTrackPublication(LivekitClient.Track.Source.Camera);
+            if (localVideoTrack && localVideoTrack.videoTrack) {
+                const localElement = localVideoTrack.videoTrack.attach();
+                document.getElementById('local-video-container').appendChild(localElement);
+            }
+
+            // ফিক্সড ট্র্যাক ইভেন্ট হ্যান্ডলার: অডিও এবং ভিডিও আলাদা ও নিরাপদ কন্টেইনারে অ্যাটাচ করা
+            // index.html এর এই ইভেন্ট লিসেনারটি পুরোপুরি রিপ্লেস করুন:
+            console.log("Entering to room");
+
+            room.on(LivekitClient.RoomEvent.TrackSubscribed, (track) => {
+                
+                const element = track.attach();
+                
+                console.log(track.kind);
+
+                if (track.kind === "video") {
+                    const remoteContainer = document.getElementById('remote-video-container');
+                    const aiIcon = document.getElementById('ai-icon');
+                    if (aiIcon) aiIcon.remove();
+                    remoteContainer.appendChild(element);
+                } 
+                else if (track.kind === "audio") {
+                    const audioContainer = document.getElementById('audio-container');
+                    audioContainer.innerHTML = ""; // আগের ওল্ড ট্র্যাক মুছে ফেলা
+                    audioContainer.style.display = "block"; // স্ক্রিনে প্লেয়ার বারটি দৃশ্যমান করা
+                    
+                    // ব্রাউজার যাতে সাউন্ড ব্লক না করে সেজন্য কন্ট্রোল ফোর্স করা
+                    element.controls = true;
+                    element.autoplay = true;
+                    element.muted = false;
+                    element.volume = 1.0;
+                    audioContainer.appendChild(element);
+                    
+                    audioContainer.innerHTML = ""; // ক্লিয়ার ওল্ড ট্র্যাকারস
+                    audioContainer.style.display = "block"; // স্ক্রিনে প্লেয়ারটি দেখাবে
+                    audioContainer.appendChild(element);
+
+                    // ফিক্স: ব্রাউজারের অডিও ইঞ্জিনকে ফোর্স অ্যাক্টিভেট করা (কাস্টমারকে কোনো পপআপ বা প্লে বাটনে ক্লিক করতে হবে না)
+                    const playAudio = () => {
+                        element.play().catch(err => {
+                            console.log("Autoplay context suspended. Forcing wake up...");
+                            // ক্যান্ডিডেট স্ক্রিনে যেকোনো জায়গায় প্রথম মাউস নাড়ালেই বা কথা বললেই আওয়াজ অন হয়ে যাবে
+                            document.body.addEventListener('mousemove', () => { element.play(); }, { once: true });
+                            document.body.addEventListener('touchstart', () => { element.play(); }, { once: true });
+                        });
+                    };
+                    playAudio();
+                    
+                    // প্লে ব্যাক ফোর্স করা
+                    element.play().then(() => {
+                        console.log("Gemini Voice streaming successfully started.");
+                    }).catch(err => {
+                        console.log("Autoplay blocked by browser. Forcing interact:", err);
+                        statusDiv.innerText = "🚨 ব্রাউজার ভয়েস ব্লক করেছে! নিচের অডিও প্লেয়ারের PLAY বাটনে ক্লিক করুন।";
+                        statusDiv.style.color = "red";
+                    });
+                }
+            });
+
+
+            room.on(LivekitClient.RoomEvent.DataReceived, (payload, participant) => {
+                const decoder = new TextDecoder();
+                const text = decoder.decode(payload);
+                console.log("Data Received from Agent:", text);
+                if (text.startsWith("QUESTION:")) {
+                    qBox.innerText = text.replace("QUESTION:", "");
+                }
+            });
+
+        } catch (error) {
+            console.error("LiveKit Connection Error:", error);
+            statusDiv.innerText = "Connection Failed! Check backend console.";
+            statusDiv.style.color = "red";
+            startBtn.disabled = false;
+        }
+    }
+
+        // dashboard.html এর loadResults ফাংশনের ভেতরের লুপটি এভাবে আপডেট করুন:
+    async function loadResults() {
+        try {
+            const response = await fetch('/view-results');
+            const data = await response.json();
+            const tbody = document.getElementById('results-body');
+            tbody.innerHTML = ""; // ক্লিয়ার ওল্ড ডেটা
+
+            if (!data.interviews || data.interviews.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: #888;">এখনো কোনো ইন্টারভিউ রেকর্ড জমা হয়নি।</td></tr>`;
+                return;
+            }
+
+            // ফিক্সড অবজেক্ট ম্যাপিং লুপ
+            data.interviews.forEach(row => {
+                const tr = document.createElement('tr');
+                const isPass = row.decision.toLowerCase() === 'pass';
+                const badgeClass = isPass ? 'badge-pass' : 'badge-fail';
+                const scoreColor = isPass ? '#137333' : '#c5221f';
+                
+                tr.innerHTML = `
+                    <td><b>#${row.id}</b></td>
+                    <td>${row.candidate_name}</td>
+                    <td class="score" style="color: ${scoreColor}">${row.score}/100</td>
+                    <td><span class="badge ${badgeClass}">${row.decision}</span></td>
+                    <td><div class="feedback-box">${row.client_feedback}</div></td>
+                    <td><div class="feedback-box">${row.customer_feedback}</div></td>
+                `;
+                tbody.appendChild(tr);
+            });
+        } catch (error) {
+            console.error("Error fetching results:", error);
+            document.getElementById('results-body').innerHTML = `<tr><td colspan="6" style="text-align: center; color: red;">ডেটা লোড করতে ব্যর্থ হয়েছে!</td></tr>`;
+        }
+    }
+
+</script>
+</body>
+</html>

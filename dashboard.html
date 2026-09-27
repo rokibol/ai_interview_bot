@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Client Interview Dashboard</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f6f9; margin: 0; padding: 40px; }
+        .container { max-width: 1100px; margin: 0 auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
+        h1 { color: #1a73e8; margin-bottom: 25px; border-bottom: 2px solid #f0f2f5; padding-bottom: 10px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th, td { padding: 15px; text-align: left; border-bottom: 1px solid #e0e0e0; }
+        th { background-color: #f8f9fa; color: #495057; font-weight: 600; }
+        .badge { padding: 6px 12px; border-radius: 50px; font-size: 13px; font-weight: bold; text-transform: uppercase; }
+        .badge-pass { background-color: #e6f4ea; color: #137333; }
+        .badge-fail { background-color: #fce8e6; color: #c5221f; }
+        .score { font-weight: bold; font-size: 16px; }
+        .feedback-box { font-size: 14px; color: #5f6368; max-width: 300px; white-space: pre-line; }
+        .refresh-btn { background-color: #1a73e8; color: white; border: none; padding: 10px 20px; font-size: 15px; font-weight: bold; border-radius: 6px; cursor: pointer; float: right; transition: 0.3s; }
+        .refresh-btn:hover { background-color: #1557b0; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <button class="refresh-btn" onclick="loadResults()">Refresh Data</button>
+    <h1>Client Interview Dashboard (Owner View)</h1>
+    
+    <table id="results-table">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Candidate Name</th>
+                <th>Score</th>
+                <th>Status</th>
+                <th>Client Feedback (English)</th>
+                <th>Customer Feedback (Bengali)</th>
+            </tr>
+        </thead>
+        <tbody id="results-body">
+            <tr>
+                <td colspan="6" style="text-align: center; color: #888;">Loading interview results...</td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+
+<script>
+    async function loadResults() {
+        try {
+            const response = await fetch('/view-results');
+            const data = await response.json();
+            const tbody = document.getElementById('results-body');
+            tbody.innerHTML = ""; // ক্লিয়ার ওল্ড ডেটা
+
+            if (data.interviews.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: #888;">এখনো কোনো ইন্টারভিউ রেকর্ড জমা হয়নি।</td></tr>`;
+                return;
+            }
+
+            data.interviews.forEach(row => {
+                const tr = document.createElement('tr');
+                const badgeClass = row[3].toLowerCase() === 'pass' ? 'badge-pass' : 'badge-fail';
+                
+                tr.innerHTML = `
+                    <td><b>#${row[0]}</b></td>
+                    <td>${row[1]}</td>
+                    <td class="score" style="color: ${row[3].toLowerCase() === 'pass' ? '#137333' : '#c5221f'}">${row[2]}/100</td>
+                    <td><span class="badge ${badgeClass}">${row[3]}</span></td>
+                    <td><div class="feedback-box">${row[4]}</div></td>
+                    <td><div class="feedback-box">${row[5]}</div></td>
+                `;
+                tbody.appendChild(tr);
+            });
+        } catch (error) {
+            console.error("Error fetching results:", error);
+            document.getElementById('results-body').innerHTML = `<tr><td colspan="6" style="text-align: center; color: red;">ডেটা লোড করতে ব্যর্থ হয়েছে!</td></tr>`;
+        }
+    }
+
+    // পেজ লোড হওয়ার সাথে সাথে ডেটা ফেচ করা
+    window.onload = loadResults;
+</script>
+
+</body>
+</html>
